@@ -41,7 +41,7 @@ class FileData:
     __slots__ = ("path", "signature", "block_size_bytes", "size_bytes", "blocks")
 
     def __init__(
-        self: FileData,
+        self: "FileData",
         path: Path,
         signature: Signature,
         block_size_bytes: int,
@@ -53,6 +53,9 @@ class FileData:
         self.block_size_bytes = block_size_bytes
         self.size_bytes = size_bytes
         self.blocks = blocks
+        self._assert_block_qty()
+
+    def _assert_block_qty(self: "FileData") -> None:
         assert (
             len(self.blocks) == self.num_blocks
         ), f"Need exactly {self.num_blocks} blocks. Got {len(self.blocks)}."

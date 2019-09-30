@@ -11,7 +11,9 @@ black = "*"
 mypy = "*"
 flake8 = "*"
 argparse-logging = "*"
-python-rocksdb = "*"
+# python-rocksdb = "*"
+pytest = "==5.0.1"  # https://github.com/VSCodium/vscodium/issues/243
+pytest-mock = "*"
 
 [requires]
 python_version = "3.7"
