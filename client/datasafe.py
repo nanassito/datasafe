@@ -66,27 +66,52 @@ class FileData:
 
 
 def fetch_client_config() -> Config:
-    raise NotImplementedError()
+    """Read the user configuration."""
+    # TODO: Implement
+    return Config(
+        user=User("not_a_valid_token"),
+        sources=[
+            Source(path="~/code/"),
+            Source(path="/home/dorian/Videos/"),
+        ],
+    )
 
 
 def read_filesystem_metadata(source: Source) -> List[FileMetadata]:
+    """List all files in the source.
+
+    We not only list the files but also get their signatures. Since computing the
+    signature of a file is an expensive operation, we use the os.stat() properties
+    of the file to check against a cache to get a sense of whether the file has
+    been updated or not.
+    """
     raise NotImplementedError()
 
 
 class Api:
+    """Client side implementation of the API."""
+
     def __init__(self: "Api", user: User) -> None:
-        raise NotImplementedError()
+        self.user = user
 
     async def get_destinations(
         self: "Api", fs_metadata: List[FileMetadata]
     ) -> List[FileData]:
+        """Asks the server where to upload the blocks for each file."""
         raise NotImplementedError()
 
     async def commit(self: "Api", fs: List[FileData]) -> None:
+        """Tell the server all the blocks for all the files have been uploaded."""
         raise NotImplementedError()
 
 
 async def process_file(file: FileData) -> FileData:
+    """Make sure all blocks of a file are backed up.
+    
+    If the signature is unchanged, this won't do anything.
+    If the signature has changed, we will upload all the blocks that needs to be.
+    
+    We then return a new FileData object with all the correct blocks."""
     raise NotImplementedError()
 
 
