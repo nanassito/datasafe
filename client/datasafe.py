@@ -1,8 +1,12 @@
 import asyncio
+import json
 import math
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, fields
 from itertools import chain
-from typing import List, NewType
+from threading import Lock
+from types import TracebackType
+from typing import Dict, List, Mapping, NewType, Type
 
 Path = NewType("Path", str)
 Signature = NewType("Signature", str)
@@ -65,19 +69,66 @@ class FileData:
         return math.ceil(self.size_bytes / self.block_size_bytes)
 
 
+class FsMetadataCache:
+    """Implements a persistent key-value cache for the fs metadata."""
+
+    __slots__ = ("_path", "_data")
+
+    def __init__(self: "FsMetadataCache", path: str = "./datasafe.db") -> None:
+        self._path = path
+        if not os.path.exists(path) or os.stat(path).st_size == 0:
+            # Init the db file if it doesn't exists
+            with open(path, "w") as fd:
+                json.dump({}, fd)
+        assert os.access(path, os.R_OK), f"Make sure {path} is readable."
+        assert os.access(path, os.W_OK), f"Make sure {path} is writable."
+
+    def __enter__(self: "FsMetadataCache") -> Dict[Path, FileMetadata]:
+        with open(self._path) as fd:
+            self._data = {
+                Path(key): FileMetadata(
+                    path=Path(value["path"]),
+                    signature=Signature(value["signature"]),
+                    size_bytes=int(value["size_bytes"]),
+                )
+                for key, value in json.load(fd).items()
+            }
+        return self._data
+
+    def __exit__(
+        self: "FsMetadataCache",
+        type: Type[BaseException],
+        value: BaseException,
+        traceback: TracebackType,
+    ) -> None:
+        with open(self._path, "w") as fd:
+            json.dump(
+                {
+                    path: {
+                        field.name: getattr(file_metadata, field.name)
+                        for field in fields(FileMetadata)
+                    }
+                    for path, file_metadata in self._data.items()
+                },
+                fd,
+            )
+
+
 def fetch_client_config() -> Config:
     """Read the user configuration."""
     # TODO: Implement
     return Config(
         user=User("not_a_valid_token"),
         sources=[
-            Source(path="~/code/"),
-            Source(path="/home/dorian/Videos/"),
+            Source(path=Path("~/code/")),
+            Source(path=Path("/home/dorian/Videos/")),
         ],
     )
 
 
-def read_filesystem_metadata(source: Source) -> List[FileMetadata]:
+def read_filesystem_metadata(
+    source: Source, cache: Dict[Path, FileMetadata]
+) -> List[FileMetadata]:
     """List all files in the source.
 
     We not only list the files but also get their signatures. Since computing the
@@ -86,6 +137,18 @@ def read_filesystem_metadata(source: Source) -> List[FileMetadata]:
     been updated or not.
     """
     raise NotImplementedError()
+
+
+def read_all_filesystem_metadata(sources: List[Source]) -> List[FileMetadata]:
+    with FsMetadataCache() as fs_metadata_cache:
+        return list(
+            chain(
+                *[
+                    read_filesystem_metadata(source, fs_metadata_cache)
+                    for source in sources
+                ]
+            )
+        )
 
 
 class Api:
@@ -118,9 +181,7 @@ async def process_file(file: FileData) -> FileData:
 async def main():
     config = fetch_client_config()
     api = Api(config.user)
-    fs_metadata = list(
-        chain(*[read_filesystem_metadata(source) for source in config.sources])
-    )
+    fs_metadata = read_all_filesystem_metadata(config.sources)
     fs_data = await api.get_destinations(fs_metadata)
     commit_fs = await asyncio.gather([process_file(file) for file in fs_data])
     await api.commit(commit_fs)
