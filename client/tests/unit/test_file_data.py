@@ -1,6 +1,3 @@
-# Test the init assertion
-
-
 import pytest
 
 from client.datasafe import FileData

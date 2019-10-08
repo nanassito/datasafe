@@ -3,6 +3,7 @@ import json
 import math
 import os
 from dataclasses import dataclass, fields
+from hashlib import sha256
 from itertools import chain
 from threading import Lock
 from types import TracebackType
@@ -33,6 +34,7 @@ class FileMetadata:
     path: Path
     signature: Signature
     size_bytes: int
+    os_stat: os.stat_result
 
 
 @dataclass
@@ -90,6 +92,7 @@ class FsMetadataCache:
                     path=Path(value["path"]),
                     signature=Signature(value["signature"]),
                     size_bytes=int(value["size_bytes"]),
+                    os_stat=os.stat_result(value["os_stat"]),
                 )
                 for key, value in json.load(fd).items()
             }
@@ -126,6 +129,29 @@ def fetch_client_config() -> Config:
     )
 
 
+def read_file_metadata(
+    path: Path,
+    cache: Dict[Path, FileMetadata],
+    block_size_bytes: int = 4096,  # TODO: Make the block size configurable
+) -> FileMetadata:
+    stats = os.stat(path)
+    if getattr(cache.get(path, None), "os_stat", object()) != stats:
+        file_hash = sha256()
+        with open(path, "rb") as fd:
+            while True:
+                data = fd.read(block_size_bytes)
+                if not data:
+                    break
+                file_hash.update(data)
+        cache[path] = FileMetadata(
+            path=path,
+            signature=Signature(file_hash.hexdigest()),
+            os_stat=stats,
+            size_bytes=stats.st_size,
+        )
+    return cache[path]
+
+
 def read_filesystem_metadata(
     source: Source, cache: Dict[Path, FileMetadata]
 ) -> List[FileMetadata]:
@@ -136,6 +162,7 @@ def read_filesystem_metadata(
     of the file to check against a cache to get a sense of whether the file has
     been updated or not.
     """
+
     raise NotImplementedError()
 
 

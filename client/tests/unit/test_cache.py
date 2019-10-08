@@ -1,3 +1,4 @@
+import os
 from tempfile import NamedTemporaryFile
 
 import pytest
@@ -15,7 +16,10 @@ from client.datasafe import (
 
 def test_cache_survives_restart():
     metadata = FileMetadata(
-        path=Path("value"), signature=Signature("value"), size_bytes=42
+        path=Path("value"),
+        signature=Signature("value"),
+        size_bytes=42,
+        os_stat=os.stat_result(range(10)),
     )
     with NamedTemporaryFile() as fd:
         with FsMetadataCache(fd.name) as cache:
