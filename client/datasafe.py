@@ -7,7 +7,7 @@ from hashlib import sha256
 from itertools import chain
 from threading import Lock
 from types import TracebackType
-from typing import Dict, List, Mapping, NewType, Type
+from typing import Dict, List, Mapping, NewType, Type, Optional
 
 Path = NewType("Path", str)
 Signature = NewType("Signature", str)
@@ -131,25 +131,26 @@ def fetch_client_config() -> Config:
 
 def read_file_metadata(
     path: Path,
-    cache: Dict[Path, FileMetadata],
+    cached: Optional[FileMetadata],
     block_size_bytes: int = 4096,  # TODO: Make the block size configurable
 ) -> FileMetadata:
+    """Return metadata for a file. Optimized against the cached value."""
     stats = os.stat(path)
-    if getattr(cache.get(path, None), "os_stat", object()) != stats:
-        file_hash = sha256()
-        with open(path, "rb") as fd:
-            while True:
-                data = fd.read(block_size_bytes)
-                if not data:
-                    break
-                file_hash.update(data)
-        cache[path] = FileMetadata(
-            path=path,
-            signature=Signature(file_hash.hexdigest()),
-            os_stat=stats,
-            size_bytes=stats.st_size,
-        )
-    return cache[path]
+    if getattr(cached, "os_stat", object()) == stats:
+        return cached
+    file_hash = sha256()
+    with open(path, "rb") as fd:
+        while True:
+            data = fd.read(block_size_bytes)
+            if not data:
+                break
+            file_hash.update(data)
+    return FileMetadata(
+        path=path,
+        signature=Signature(file_hash.hexdigest()),
+        os_stat=stats,
+        size_bytes=stats.st_size,
+    )
 
 
 def read_filesystem_metadata(
@@ -162,7 +163,7 @@ def read_filesystem_metadata(
     of the file to check against a cache to get a sense of whether the file has
     been updated or not.
     """
-
+    # Should we fan out in coroutines, threads, or processes ?
     raise NotImplementedError()
 
 
