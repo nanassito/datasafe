@@ -77,9 +77,9 @@ class FsMetadataCache:
 
     __slots__ = ("_path", "_data")
 
-    def __init__(self: "FsMetadataCache", path: str = "./datasafe.db") -> None:
+    def __init__(self: "FsMetadataCache", path: Path = Path("./datasafe.db")) -> None:
         self._path = path
-        if not os.path.exists(path) or os.stat(path).st_size == 0:
+        if not path.exists() or path.lstat().st_size == 0:
             # Init the db file if it doesn't exists
             with open(path, "w") as fd:
                 json.dump({}, fd)
@@ -138,7 +138,7 @@ def read_file_metadata(
     block_size_bytes: int = 4096,  # TODO: Make the block size configurable
 ) -> FileMetadata:
     """Return metadata for a file. Optimized against the cached value."""
-    stats = os.stat(path)
+    stats = path.lstat()
     if getattr(cached, "os_stat", object()) == stats:
         return cached
     file_hash = sha256()

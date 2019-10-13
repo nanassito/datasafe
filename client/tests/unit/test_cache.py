@@ -16,7 +16,7 @@ def test_cache_survives_restart():
         os_stat=os.stat_result(range(10)),
     )
     with NamedTemporaryFile() as fd:
-        with datasafe.FsMetadataCache(fd.name) as cache:
+        with datasafe.FsMetadataCache(Path(fd.name)) as cache:
             cache[Path("key")] = metadata
-        with datasafe.FsMetadataCache(fd.name) as cache:
+        with datasafe.FsMetadataCache(Path(fd.name)) as cache:
             assert metadata == cache[Path("key")]
