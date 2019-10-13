@@ -5,11 +5,12 @@ import os
 from dataclasses import dataclass, fields
 from hashlib import sha256
 from itertools import chain
+from multiprocessing.pool import ThreadPool
+from pathlib import Path
 from threading import Lock
 from types import TracebackType
-from typing import Dict, List, Mapping, NewType, Type, Optional
+from typing import Dict, List, Mapping, NewType, Optional, Set, Type
 
-Path = NewType("Path", str)
 Signature = NewType("Signature", str)
 
 
@@ -107,9 +108,11 @@ class FsMetadataCache:
         with open(self._path, "w") as fd:
             json.dump(
                 {
-                    path: {
-                        field.name: getattr(file_metadata, field.name)
-                        for field in fields(FileMetadata)
+                    str(path): {
+                        "path": str(file_metadata.path),
+                        "signature": str(file_metadata.signature),
+                        "size_bytes": file_metadata.size_bytes,
+                        "os_stat": tuple(file_metadata.os_stat),
                     }
                     for path, file_metadata in self._data.items()
                 },
@@ -153,30 +156,34 @@ def read_file_metadata(
     )
 
 
-def read_filesystem_metadata(
-    source: Source, cache: Dict[Path, FileMetadata]
-) -> List[FileMetadata]:
-    """List all files in the source.
+def read_all_filesystem_metadata(sources: List[Source]) -> Set[FileMetadata]:
+    """List all files in the sources.
 
     We not only list the files but also get their signatures. Since computing the
     signature of a file is an expensive operation, we use the os.stat() properties
     of the file to check against a cache to get a sense of whether the file has
     been updated or not.
     """
-    # Should we fan out in coroutines, threads, or processes ?
-    raise NotImplementedError()
-
-
-def read_all_filesystem_metadata(sources: List[Source]) -> List[FileMetadata]:
+    # TODO: What do we do when a file isn't readable ?
+    cached_fs = {}
     with FsMetadataCache() as fs_metadata_cache:
-        return list(
-            chain(
-                *[
-                    read_filesystem_metadata(source, fs_metadata_cache)
-                    for source in sources
-                ]
+        for source in sources:
+            for dirpath, _dirnames, filenames in os.walk(source.path):
+                for filename in filenames:
+                    path = Path(os.path.abspath(os.path.join(dirpath, filename)))
+                    cached_file_metadata = fs_metadata_cache.get(path, None)
+                    # It is possible we override ourselves here if two sources overlap.
+                    cached_fs[path] = cached_file_metadata
+        pool = ThreadPool()  # TODO: Can tune the number of processes/threads
+        fs_metadata = dict(
+            pool.map(
+                lambda x: (x[0], read_file_metadata(*x)),
+                cached_fs.items(),
+                # chunksize=None,  # TODO: Can tune the chuncksize
             )
         )
+        fs_metadata_cache.update(fs_metadata)
+    return set(fs_metadata.values())
 
 
 class Api:
