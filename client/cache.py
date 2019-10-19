@@ -20,7 +20,7 @@ class FsMetadataCache:
         self._path = path
         if not path.exists() or path.stat().st_size == 0:
             # Init the db file if it doesn't exists
-            _LOG.info(f"Couldn't find an existing cache. Creating a new one in {path}.")
+            _LOG.warning(f"Couldn't find an existing cache. Creating a new one in {path}.")
             with open(path, "w") as fd:
                 json.dump({}, fd)
         assert os.access(path, os.R_OK), f"Make sure {path} is readable."
