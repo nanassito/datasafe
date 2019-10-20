@@ -29,13 +29,8 @@ class FsMetadataCache:
     def __enter__(self: "FsMetadataCache") -> Dict[Path, FileMetadata]:
         with open(self._path) as fd:
             self._data = {
-                Path(key): FileMetadata(
-                    path=Path(value["path"]),
-                    signature=Signature(value["signature"]),
-                    size_bytes=int(value["size_bytes"]),
-                    os_stats=os.stat_result(value["os_stats"]),
-                )
-                for key, value in json.load(fd).items()
+                Path(key): FileMetadata(**spec)
+                for key, spec in json.load(fd).items()
             }
         _LOG.info(f"Initialized cache with {len(self._data)} values.")
         return self._data
@@ -49,12 +44,7 @@ class FsMetadataCache:
         with open(self._path, "w") as fd:
             json.dump(
                 {
-                    str(path): {
-                        "path": str(file_metadata.path),
-                        "signature": str(file_metadata.signature),
-                        "size_bytes": file_metadata.size_bytes,
-                        "os_stats": tuple(file_metadata.os_stats),
-                    }
+                    str(path): file_metadata.to_dict()
                     for path, file_metadata in self._data.items()
                 },
                 fd,

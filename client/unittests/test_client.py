@@ -18,7 +18,7 @@ import datasafe_client
         ),  # Valid cache
         (lambda p, h, l, s: None, True),  # Cache miss
         (
-            lambda p, h, l, s: datasafe_client.FileMetadata(p, h, l, s + (1, 2)),
+            lambda p, h, l, s: datasafe_client.FileMetadata(p, h, l, range(10)),
             True,
         ),  # Invalid cache
     ],
