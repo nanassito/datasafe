@@ -12,6 +12,7 @@ black = "*"
 pytest = "*"
 pytest-mock = "*"
 setuptools = "*"
+pytest-cov = "*"
 
 [requires]
 python_version = "3.8"

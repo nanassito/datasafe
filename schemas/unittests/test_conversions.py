@@ -1,43 +1,56 @@
-import json
 import os
 from pathlib import Path
 
 import pytest
 
-from schemas import FileMetadata, Signature
+import schemas
 
 
 @pytest.mark.parametrize(
-    ("spec", "expected"),
+    ("original"),
     [
-        (  # Using the types
-            (
-                Path("/some/where"),
-                Signature("signature"),
-                42,
-                os.stat_result(tuple(range(10))),
-            ),
-            FileMetadata(
-                Path("/some/where"),
-                Signature("signature"),
-                42,
-                os.stat_result(tuple(range(10))),
-            ),
+        schemas.FileMetadata(
+            Path("/some/where"),
+            schemas.Signature("signature"),
+            42,
+            os.stat_result(tuple(range(10))),
         ),
-        (  # Using simple types used in serialization
-            ("/some/where", "signature", 42, tuple(range(10))),
-            FileMetadata(
+        schemas.Block(schemas.Signature("signature"), "https://url.com", False),
+        schemas.FileData(
+            schemas.FileMetadata(
                 Path("/some/where"),
-                Signature("signature"),
+                schemas.Signature("signature"),
                 42,
                 os.stat_result(tuple(range(10))),
             ),
+            [
+                schemas.Block(schemas.Signature("signature"), "https://url.com", False)
+                for _ in range(5)
+            ],
+        ),
+        schemas.Registration(
+            "rig",
+            schemas.FileData(
+                schemas.FileMetadata(
+                    Path("/some/where"),
+                    schemas.Signature("signature"),
+                    42,
+                    os.stat_result(tuple(range(10))),
+                ),
+                [
+                    schemas.Block(
+                        schemas.Signature("signature"), "https://url.com", False
+                    )
+                    for _ in range(5)
+                ],
+            ),
+            "creds",
         ),
     ],
 )
-def test_file_metadata(spec, expected):
-    original = FileMetadata(*spec)
+def test_serialization_identity(original):
     serialized = original.to_dict()
-    result = FileMetadata(**serialized)
+    result = type(original).from_dict(serialized)
 
-    assert expected == original == result
+    assert isinstance(serialized, dict)
+    assert original == result
