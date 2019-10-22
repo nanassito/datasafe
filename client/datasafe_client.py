@@ -13,16 +13,11 @@ from typing import Dict, Iterator, List
 
 from argparse_logging import add_logging_arguments
 
+from api import DataSafeApiClient, ApiClientConfig
 from cache import FsMetadataCache
-from schemas import FileMetadata, Signature
+from schemas import FileMetadata, Signature, Credential
 
 _LOG = logging.getLogger(__name__)
-
-
-@dataclass
-class User:
-    identity: str
-    credential: str
 
 
 @dataclass
@@ -33,14 +28,17 @@ class Source:
 @dataclass
 class UserConfig:
     sources: List[Source]
-    user: User
+    api: ApiClientConfig
 
     @staticmethod
     def init_from_file() -> "UserConfig":
         # TODO: Implement this
         return UserConfig(
             sources=[Source(Path("/home/dorian/python/Python-3.8.0/"))],
-            user=User("not-a-user", "not-a-credential"),
+            api=ApiClientConfig(
+                credential=Credential("not-a-user", "not-a-credential"),
+                api_url="https://localhost:9090",
+            ),
         )
 
 
@@ -75,7 +73,7 @@ def backup_file(filepath: Path, cache: Dict[Path, FileMetadata]) -> None:
     # TODO: Make the read block size configurable
     file_metadata = read_file_metadata(filepath, cache.get(filepath, None))
     cache[filepath] = file_metadata
-    # registration = register_file_metadata(file_metadata)
+    registration = DataSafeApiClient.register_file_metadata(file_metadata)
     # upload(filepath, registration)
     # commit(registration)
 
@@ -100,6 +98,7 @@ def main():
     parser = ArgumentParser()
     add_logging_arguments(parser)
     user_config = UserConfig.init_from_file()
+    DataSafeApiClient.configure(user_config.api)
     backup_fs_from_sources(user_config.sources)
 
 
