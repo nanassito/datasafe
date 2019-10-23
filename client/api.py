@@ -3,7 +3,7 @@ from typing import Type
 from dataclasses import dataclass
 import requests
 
-from schemas import Credential, FileData, FileMetadata, Registration
+from schemas import Credential, FileData, FileMetadata, Registration, RegistrationId
 
 
 @dataclass
@@ -19,8 +19,7 @@ class DataSafeApiClient:
 
     @classmethod
     def configure(
-        cls: Type["DataSafeApiClient"],
-        client_config: ApiClientConfig,
+        cls: Type["DataSafeApiClient"], client_config: ApiClientConfig
     ) -> None:
         cls._CREDS = client_config.credential
         cls._API = client_config.api_url.rstrip("/")
@@ -42,13 +41,12 @@ class DataSafeApiClient:
     @classmethod
     def upload(
         cls: Type["DataSafeApiClient"], filepath: Path, registration: Registration
-    ) -> FileData:
+    ) -> FileData:  # pragma: no cover
         assert cls._CONFIGURED, "Api client is not `.configured()`"
         raise NotImplementedError()
 
     @classmethod
-    def commit(
-        cls: Type["DataSafeApiClient"], file_data: FileData, registration: Registration
-    ) -> None:
+    def commit(cls: Type["DataSafeApiClient"], registration_id: RegistrationId) -> None:
         assert cls._CONFIGURED, "Api client is not `.configured()`"
-        raise NotImplementedError()
+        resp = requests.post(cls._API + f"/commit/{registration_id}", auth=cls._CREDS)
+        assert 200 <= resp.status_code < 300, str(resp)

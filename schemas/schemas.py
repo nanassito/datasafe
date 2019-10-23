@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, NewType, Tuple, TypedDict
 
+RegistrationId = NewType("RegistrationId", str)
 Signature = NewType("Signature", str)
+Credential = namedtuple("Credential", ("username", "password"))
 
 
 class SerializedFileMetadata(TypedDict):
@@ -107,14 +109,14 @@ class SerializedRegistration(TypedDict):
 
 @dataclass
 class Registration:
-    registration_id: str
+    registration_id: RegistrationId
     file_data: FileData
     storage_creds: str
 
     @staticmethod
     def from_dict(spec: SerializedRegistration) -> "Registration":
         return Registration(
-            registration_id=str(spec["registration_id"]),
+            registration_id=RegistrationId(spec["registration_id"]),
             file_data=FileData.from_dict(spec["file_data"]),
             storage_creds=str(spec["storage_creds"]),
         )
@@ -122,11 +124,8 @@ class Registration:
     def to_dict(self: "Registration") -> SerializedRegistration:
         return SerializedRegistration(
             {
-                "registration_id": self.registration_id,
+                "registration_id": str(self.registration_id),
                 "file_data": self.file_data.to_dict(),
-                "storage_creds": self.storage_creds,
+                "storage_creds": str(self.storage_creds),
             }
         )
-
-
-Credential = namedtuple("Credential", ("username", "password"))

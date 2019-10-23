@@ -31,7 +31,7 @@ class UserConfig:
     api: ApiClientConfig
 
     @staticmethod
-    def init_from_file() -> "UserConfig":
+    def init_from_file() -> "UserConfig":  # pragma: no cover
         # TODO: Implement this
         return UserConfig(
             sources=[Source(Path("/home/dorian/python/Python-3.8.0/"))],
@@ -68,14 +68,17 @@ def read_file_metadata(
     )
 
 
-def backup_file(filepath: Path, cache: Dict[Path, FileMetadata]) -> None:
+def backup_file(
+    filepath: Path, cache: Dict[Path, FileMetadata]
+) -> None:  # pragma: no cover
     """Backup a file onto Datasafe infrastructure."""
     # TODO: Make the read block size configurable
+    # TODO: Add integration tests
     file_metadata = read_file_metadata(filepath, cache.get(filepath, None))
     cache[filepath] = file_metadata
     registration = DataSafeApiClient.register_file_metadata(file_metadata)
-    # upload(filepath, registration)
-    # commit(registration)
+    DataSafeApiClient.upload(filepath, registration)
+    DataSafeApiClient.commit(registration.registration_id)
 
 
 def traverse_fs_from_source(source: Source) -> Iterator[Path]:
@@ -85,16 +88,18 @@ def traverse_fs_from_source(source: Source) -> Iterator[Path]:
             yield Path(os.path.join(dirpath, filename)).resolve(strict=True)
 
 
-def backup_fs_from_sources(sources: List[Source]) -> None:
+def backup_fs_from_sources(sources: List[Source]) -> None:  # pragma: no cover
     """Back up all files within the sources."""
     # TODO: Speed up by adding concurrency if needed.
+    # TODO: Add integration tests
     filepaths = chain(*[traverse_fs_from_source(source) for source in sources])
     with FsMetadataCache() as fs_metadata_cache:
         for filepath in filepaths:
             backup_file(filepath, fs_metadata_cache)
 
 
-def main():
+def main():  # pragma: no cover
+    # TODO: Add integration tests
     parser = ArgumentParser()
     add_logging_arguments(parser)
     user_config = UserConfig.init_from_file()
@@ -102,5 +107,5 @@ def main():
     backup_fs_from_sources(user_config.sources)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
