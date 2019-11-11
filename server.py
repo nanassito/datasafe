@@ -1,37 +1,20 @@
-import asyncio
-import logging
-import os
-import re
-from contextlib import asynccontextmanager, contextmanager
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from hashlib import sha256
 from pathlib import Path
 from textwrap import dedent
-from typing import (
-    AsyncContextManager,
-    Iterator,
-    List,
-    NewType,
-    Optional,
-    Pattern,
-    Tuple,
-    Type,
-)
+from typing import List, Optional
 from uuid import uuid4
 
-import aiomysql
-
+import common
 import schemas
 
 
-class Server:
+class Server(common.UserAccess):
     """
     CREATE TABLE IF NOT EXISTS Users (
         username VARCHAR(767),
         password_hash TEXT,
         salt TEXT,
-        verified BOOL,
+        activated BOOL,
 
         PRIMARY KEY (username)
     );
@@ -81,77 +64,9 @@ class Server:
     );
     """
 
-    def __init__(self: "Server") -> None:
-        self.log = logging.getLogger(f"{self.__module__}.{self.__class__.__name__}")
-
-    @staticmethod
-    def salt_and_pepper(salt, password) -> str:
-        return sha256(f"{salt}{password}".encode()).hexdigest()
-
     @staticmethod
     async def get_block_size_bytes() -> schemas.NumBytes:
         return schemas.NumBytes(4 * 2 ** 20)
-
-    _RX_USERNAME = re.compile(r"^[a-z0-9\.\-\_\+]+@([a-z0-9\-\_]\.?)+$")
-
-    @asynccontextmanager
-    async def mysql(
-        self: "Server",
-    ) -> AsyncContextManager[
-        Tuple[aiomysql.connection.Connection, aiomysql.cursors.Cursor]
-    ]:
-        if not getattr(self, "_mysql", None):
-            loop = asyncio.get_event_loop()
-            self._mysql = await aiomysql.create_pool(
-                host="sandbox.c3fdoqlimzng.us-west-1.rds.amazonaws.com",
-                port=3306,
-                user="admin",
-                password="NOT SET",
-                db="sandbox",
-            )
-        async with self._mysql.acquire() as conn:
-            async with conn.cursor() as cur:
-                yield conn, cur
-
-    async def create_user(self: "Server", user: schemas.User) -> None:
-        assert Server._RX_USERNAME.match(user.username)
-        salt = uuid4()
-        password_hash = self.salt_and_pepper(salt, user.password)
-        async with self.mysql() as (connection, cursor):
-            await cursor.execute(
-                dedent(
-                    f"""
-                        INSERT INTO Users (
-                            username,
-                            password_hash,
-                            salt,
-                            verified
-                        ) VALUES (
-                            %s,
-                            %s,
-                            %s,
-                            false
-                        );
-                    """
-                ),
-                (user.username, password_hash, str(salt),),
-            )
-            await connection.commit()
-
-    async def validate_user(self: "Server", user: schemas.User) -> bool:
-        assert Server._RX_USERNAME.match(user.username)
-        sql = dedent(
-            f"""
-                SELECT
-                    Users.salt,
-                    Users.password_hash,
-                    Users.activated
-                FROM Users
-                WHERE username={user.username};
-            """
-        )
-        assert activated, "User must be activated."
-        return password_hash == self.salt_and_pepper(salt, user.password)
 
     async def declare_block(
         self: "Server", user: schemas.User, block: schemas.BlockMetadata
@@ -159,29 +74,20 @@ class Server:
         assert self.validate_user(user)
         assert schemas.validate_Signature(block.signature)
         assert schemas.validate_Bytes(block.size_bytes)
-        url = (
-            f"https://s3.copieur.com/{str(uuid4()).replace('-', '/')}/{block.signature}"
-        )
-        sql = dedent(
-            f"""
-                INSERT IGNORE INTO Blocks (
-                    signature, 
-                    size_bytes, 
-                    url
-                ) VALUES (
-                    {block.signature}, 
-                    {block.size_bytes}, 
-                    {url}
-                );
-
-                SELECT 
-                    Blocks.signature, 
-                    Blocks.size_bytes, 
-                    Blocks.url
-                FROM Blocks
-                WHERE signature={block.signature};
-            """
-        )
+        prefix = str(uuid4()).replace("-", "/")
+        url = f"https://s3.copieur.com/{prefix}/{block.signature}"
+        async with self.mysql() as (connection, cursor):
+            await cursor.execute(
+                """
+                    INSERT IGNORE INTO Blocks (
+                        signature, size_bytes, url
+                    ) VALUES (
+                        %s, %d, %s
+                    );
+                """,
+                (block.signature, block.size_bytes, url),
+            )
+            await connection.commit()
         return schemas.UploadInstruction(url=url)
 
     async def commit(
@@ -193,39 +99,51 @@ class Server:
             [schemas.validate_Signature(bs) for bs in commit_data.block_signatures]
         )
         commit_id = schemas.CommitId(schemas.Identifier(str(uuid4())))
-        # TODO: escape path
-        for position, block_signature in enumerate(commit_data.block_signatures):
-            sql = dedent(
-                f"""
-                    INSERT INTO Commit2Blocks (
-                        block_signature,
-                        commit_id,
-                        position
-                    ) VALUES (
-                        {block_signature},
-                        {commit_id},
-                        {position}
-                    );
-                """
+        batch_insert_params = [
+            (block_signature, commit_id, position)
+            for position, block_signature in enumerate(commit_data.block_signatures)
+        ]
+        async with self.mysql() as (connection, cursor):
+            await cursor.executemany(
+                dedent(
+                    """
+                        INSERT INTO Commit2Blocks (
+                            block_signature, commit_id, position
+                        ) VALUES (
+                            %s, %s, %d
+                        );
+                    """
+                ),
+                batch_insert_params,
             )
-        commit_time = datetime.now(timezone.utc)
-        sql = dedent(
-            f"""
-                INSERT INTO Commits (
+            commit_time = datetime.now(timezone.utc)
+            await cursor.execute(
+                dedent(
+                    """
+                        INSERT INTO Commits (
+                            commit_id,
+                            commit_utc_datetime,
+                            owner,
+                            path,
+                            size_bytes,
+                        ) VALUES (
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %d
+                        );
+                    """
+                ),
+                (
                     commit_id,
-                    commit_utc_datetime,
-                    owner,
-                    path,
-                    size_bytes,
-                ) VALUES (
-                    {commit_id},
-                    {commit_time},
-                    {user.username},
-                    {commit_data.path},
-                    {commit_data.size_bytes}
-                );
-            """
-        )
+                    commit_time.isoformat(),
+                    user.username,
+                    str(commit_data.path),
+                    commit_data.size_bytes,
+                ),
+            )
+            await connection.commit()
         return schemas.CommitMetadata(
             filepath=commit_data.path,
             size_bytes=commit_data.size_bytes,
@@ -238,29 +156,33 @@ class Server:
         self: "Server", user: schemas.User, time: datetime, file_prefix: str
     ) -> List[schemas.CommitMetadata]:
         assert self.validate_user(user)
-        sql = dedent(
-            f"""
-                SELECT
-                    Commits.path,
-                    Commits.commit_id,
-                    Commits.size_bytes,
-                    Commits.commit_utc_datetime
-                FROM Commits
-                WHERE owner = {user.username}
-                    AND commit_utc_datetime <= {time}
-                    AND path LIKE '{file_prefix}%'
-            """
-        )
-        return [
-            schemas.CommitMetadata(
-                filepath=Path(row.path),
-                size_bytes=schemas.NumBytes(row.size_bytes),
-                owner=user.username,
-                commit_utc_datetime=row.commit_utc_datetime,
-                commit_id=schemas.CommitId(row.commit_id),
+        async with self.mysql() as (connection, cursor):
+            await cursor.execute(
+                dedent(
+                    """
+                        SELECT
+                            Commits.path,
+                            Commits.commit_id,
+                            Commits.size_bytes,
+                            Commits.commit_utc_datetime
+                        FROM Commits
+                        WHERE owner = %s
+                            AND commit_utc_datetime <= %s
+                            AND path LIKE %s
+                    """
+                ),
+                (user.username, time.isoformat(), f"{file_prefix}%"),
             )
-            for row in cursor
-        ]
+            return [
+                schemas.CommitMetadata(
+                    filepath=Path(row.path),
+                    size_bytes=schemas.NumBytes(row.size_bytes),
+                    owner=user.username,
+                    commit_utc_datetime=row.commit_utc_datetime,
+                    commit_id=schemas.CommitId(row.commit_id),
+                )
+                for row in await cursor.fetchall()
+            ]
 
     async def request_restore(
         self: "Server", user: schemas.User, commit_ids: List[schemas.CommitId]
@@ -268,31 +190,35 @@ class Server:
         assert self.validate_user(user)
         assert all([schemas.validate_Id(commit_id) for commit_id in commit_ids])
         restore_id = schemas.RestoreId(schemas.Identifier(str(uuid4())))
-        for commit_id in commit_ids:
-            sql = dedent(
-                f"""
-                    INSERT INTO Restore2Commits (
-                        restore_id,
-                        commit_id,
-                        status,
-                    ) VALUES (
-                        {restore_id},
-                        {commit_id},
-                        'requested'
-                    );
-                """
+        async with self.mysql() as (connection, cursor):
+            await cursor.executemany(
+                dedent(
+                    """
+                        INSERT INTO Restore2Commits (
+                            restore_id, commit_id, status,
+                        ) VALUES (
+                            %s, %s, 'requested'
+                        );
+                    """
+                ),
+                [
+                    (restore_id, commit_id)
+                    for commit_id in commit_ids
+                ],
             )
-        sql = dedent(
-            f"""
-                INSERT INTO Restores (
-                    restore_id,
-                    requester,
-                    request_utc_datetime
-                ) VALUES (
-                    {restore_id}
-                )
-            """
-        )
+            await cursor.execute(
+                dedent(
+                    f"""
+                        INSERT INTO Restores (
+                            restore_id, requester, request_utc_datetime
+                        ) VALUES (
+                            %s, %s, %s
+                        )
+                    """
+                ),
+                (restore_id, user.username, datetime.now(timezone.utc).isoformat()),
+            )
+            await cursor.commit()
         return restore_id
 
     # Background processes.

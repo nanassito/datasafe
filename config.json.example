@@ -1,0 +1,9 @@
+{
+    "database": {
+        "host": "instance.farm.mysql.io",
+        "port": 3306,
+        "user": "dolphin",
+        "password": "password1234!",
+        "db": "flipper"
+    }
+}
