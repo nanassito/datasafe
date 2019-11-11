@@ -106,7 +106,7 @@ class Server:
                 host="sandbox.c3fdoqlimzng.us-west-1.rds.amazonaws.com",
                 port=3306,
                 user="admin",
-                password="tW4R3WOMZ3OY9Cdjsx7N",
+                password="NOT SET",
                 db="sandbox",
             )
         async with self._mysql.acquire() as conn:
