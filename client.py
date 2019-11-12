@@ -1,11 +1,15 @@
 import asyncio
 import logging
 import os
+from argparse import ArgumentParser
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Iterator, List, Pattern, Type
 
+from argparse_logging import add_logging_arguments
+
+import common
 import schemas
 import server
 
@@ -25,18 +29,18 @@ class Configuration:
     def from_file(cls: Type["Configuration"], configpath: Path,) -> "Configuration":
         # TODO: implement this.
         return cls(
-            sources=[Source(root=Path("/home/dorian/python/"), blacklist=[]),],
-            user=schemas.User(schemas.Username("username"), "password"),
+            sources=[Source(root=Path("/home/dorian/test/"), blacklist=[])],
+            user=schemas.User(schemas.Username("local@jaminais.fr"), "password"),
         )
 
 
-class Client:
-    __slots__ = "config"
+class Client(common.Loggable):
+    __slots__ = ("config", "server")
 
     def __init__(self: "Client", configpath: Path = Path("/etc/copieur.json")) -> None:
+        super().__init__()
         self.config = Configuration.from_file(configpath)
         self.server = server.Server()
-        self.log = logging.getLogger(f"{self.__module__}.{self.__class__.__name__}")
 
     def walk_fs(self: "Client", source: Source) -> Iterator[Path]:
         for dirpath, _dirnames, filenames in os.walk(source.root):
@@ -44,7 +48,8 @@ class Client:
                 filepath = Path(dirpath) / filename
                 ignore = False
                 for blacklist in source.blacklist:
-                    if match := blacklist.match(str(filepath)):
+                    match = blacklist.match(str(filepath))
+                    if match:
                         ignore = True
                         self.log.info(
                             f"Ignoring {filepath} because it matched '{blacklist}': {match}"
@@ -73,7 +78,7 @@ class Client:
         block_signatures: List[schemas.Signature] = []
         block_size_bytes = await self.server.get_block_size_bytes()
         with open(filepath, "rb") as fd:
-            while (block_content := fd.read(block_size_bytes)) :
+            while (block_content := fd.read(block_size_bytes)) :  # noqa: E231
                 block_signatures.append(await self.backup_block(block_content))
         self.log.info(f"New commit for {filepath} with {len(block_signatures)} blocks.")
         await self.server.commit(
@@ -91,3 +96,10 @@ class Client:
         for source in self.config.sources:
             for filepath in self.walk_fs(source):
                 loop.run_until_complete(self.backup(filepath))
+
+
+if __name__ == "__main__":
+    parser = ArgumentParser()
+    add_logging_arguments(parser)
+    parser.parse_args()
+    Client().main()

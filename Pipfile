@@ -13,6 +13,7 @@ black = "*"
 mypy = "*"
 flake8 = "*"
 aiomysql = "*"
+argparse-logging = "*"
 
 [requires]
 python_version = "3.8"

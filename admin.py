@@ -1,4 +1,3 @@
-import asyncio
 from textwrap import dedent
 from uuid import uuid4
 
@@ -26,14 +25,3 @@ class Admin(common.UserAccess):
                 (user.username, password_hash, str(salt)),
             )
             await connection.commit()
-
-
-if __name__ == "__main__":
-    admin = Admin()
-    user = schemas.User(
-        username=schemas.Username(f"test_{uuid4()}@jaminais.fr"),
-        password="This is a bad password",
-    )
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(admin.create_user(user))
-    loop.run_until_complete(admin.validate_user(user))

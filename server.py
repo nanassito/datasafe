@@ -23,6 +23,8 @@ class Server(common.UserAccess):
         signature VARCHAR(65),
         size_bytes INT,
         url TEXT,
+        verified BOOL,
+        protected BOOL,
 
         PRIMARY KEY (signature)
     );
@@ -71,29 +73,50 @@ class Server(common.UserAccess):
     async def declare_block(
         self: "Server", user: schemas.User, block: schemas.BlockMetadata
     ) -> Optional[schemas.UploadInstruction]:
-        assert self.validate_user(user)
+        assert await self.validate_user(user)
         assert schemas.validate_Signature(block.signature)
         assert schemas.validate_Bytes(block.size_bytes)
-        prefix = str(uuid4()).replace("-", "/")
-        url = f"https://s3.copieur.com/{prefix}/{block.signature}"
         async with self.mysql() as (connection, cursor):
             await cursor.execute(
-                """
-                    INSERT IGNORE INTO Blocks (
-                        signature, size_bytes, url
-                    ) VALUES (
-                        %s, %d, %s
-                    );
-                """,
-                (block.signature, block.size_bytes, url),
+                dedent(
+                    """
+                        SELECT
+                            url,
+                            verified and protected as skip_upload
+                        FROM Blocks
+                        WHERE signature=%s
+                    """
+                ),
+                (block.signature, ),
             )
-            await connection.commit()
+            if cursor.rowcount:
+                url, skip_upload = await cursor.fetchone()
+                if skip_upload:
+                    self.log.debug(f"Reusing url {url} for block {block.signature}.")
+                    return None
+            else:
+                prefix = str(uuid4()).replace("-", "/")
+                url = f"https://s3.copieur.com/{prefix}/{block.signature}"
+                await cursor.execute(
+                    dedent(
+                        """
+                            INSERT INTO Blocks (
+                                signature, size_bytes, url, verified, protected
+                            ) VALUES (
+                                %s, %s, %s, false, false
+                            );
+                        """
+                    ),
+                    (block.signature, block.size_bytes, url),
+                )
+                await connection.commit()
+
         return schemas.UploadInstruction(url=url)
 
     async def commit(
         self: "Server", user: schemas.User, commit_data: schemas.CommitData
     ) -> schemas.CommitMetadata:
-        assert self.validate_user(user)
+        assert await self.validate_user(user)
         assert schemas.validate_Bytes(commit_data.size_bytes)
         assert all(
             [schemas.validate_Signature(bs) for bs in commit_data.block_signatures]
@@ -110,7 +133,7 @@ class Server(common.UserAccess):
                         INSERT INTO Commit2Blocks (
                             block_signature, commit_id, position
                         ) VALUES (
-                            %s, %s, %d
+                            %s, %s, %s
                         );
                     """
                 ),
@@ -125,19 +148,19 @@ class Server(common.UserAccess):
                             commit_utc_datetime,
                             owner,
                             path,
-                            size_bytes,
+                            size_bytes
                         ) VALUES (
                             %s,
                             %s,
                             %s,
                             %s,
-                            %d
+                            %s
                         );
                     """
                 ),
                 (
                     commit_id,
-                    commit_time.isoformat(),
+                    commit_time.isoformat(),  # TODO: use Mysql format
                     user.username,
                     str(commit_data.path),
                     commit_data.size_bytes,
@@ -155,7 +178,7 @@ class Server(common.UserAccess):
     async def list_commits_until(
         self: "Server", user: schemas.User, time: datetime, file_prefix: str
     ) -> List[schemas.CommitMetadata]:
-        assert self.validate_user(user)
+        assert await self.validate_user(user)
         async with self.mysql() as (connection, cursor):
             await cursor.execute(
                 dedent(
@@ -171,6 +194,7 @@ class Server(common.UserAccess):
                             AND path LIKE %s
                     """
                 ),
+                # TODO: use Mysql format
                 (user.username, time.isoformat(), f"{file_prefix}%"),
             )
             return [
@@ -187,7 +211,7 @@ class Server(common.UserAccess):
     async def request_restore(
         self: "Server", user: schemas.User, commit_ids: List[schemas.CommitId]
     ) -> schemas.RestoreId:
-        assert self.validate_user(user)
+        assert await self.validate_user(user)
         assert all([schemas.validate_Id(commit_id) for commit_id in commit_ids])
         restore_id = schemas.RestoreId(schemas.Identifier(str(uuid4())))
         async with self.mysql() as (connection, cursor):
@@ -201,14 +225,11 @@ class Server(common.UserAccess):
                         );
                     """
                 ),
-                [
-                    (restore_id, commit_id)
-                    for commit_id in commit_ids
-                ],
+                [(restore_id, commit_id) for commit_id in commit_ids],
             )
             await cursor.execute(
                 dedent(
-                    f"""
+                    """
                         INSERT INTO Restores (
                             restore_id, requester, request_utc_datetime
                         ) VALUES (
@@ -216,6 +237,7 @@ class Server(common.UserAccess):
                         )
                     """
                 ),
+                # TODO: use Mysql format
                 (restore_id, user.username, datetime.now(timezone.utc).isoformat()),
             )
             await cursor.commit()

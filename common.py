@@ -71,5 +71,4 @@ class UserAccess(MysqlAccess):
             # print(cursor.mogrify(sql, params))
             await cursor.execute(sql, params)
             salt, password_hash, activated = await cursor.fetchone()
-        assert activated, "User must be activated."
-        return password_hash == self.salt_and_pepper(salt, user.password)
+        return activated and password_hash == self.salt_and_pepper(salt, user.password)
